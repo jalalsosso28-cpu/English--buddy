@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>English Buddy</title>
+<style>
+:root{--ink:#12263A;--sea:#1F7A8C;--foam:#E8F1F2;--sun:#F2B134;--bg:#F7F9FA;--me:#1F7A8C;--ai:#fff}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.45 system-ui,sans-serif;background:var(--bg);color:var(--ink);height:100vh;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top)}
+header{padding:14px 16px 8px}
+h1{margin:0 0 8px;font-size:20px}
+#topics{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px}
+#topics button{flex:none;border:1.5px solid var(--sea);background:#fff;color:var(--sea);border-radius:20px;padding:8px 14px;font-size:15px}
+#topics button.on{background:var(--sea);color:#fff}
+#chat{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px}
+.b{max-width:85%;padding:10px 14px;border-radius:16px;white-space:pre-wrap}
+.me{align-self:flex-end;background:var(--me);color:#fff;border-bottom-right-radius:4px}
+.ai{align-self:flex-start;background:var(--ai);border:1px solid #dde5e8;border-bottom-left-radius:4px}
+.hint{color:#5b6b78;text-align:center;margin:auto 0}
+footer{display:flex;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:#fff;border-top:1px solid #dde5e8}
+input{flex:1;font-size:16px;padding:12px;border:1.5px solid #cfd9de;border-radius:12px}
+footer button{border:0;border-radius:12px;padding:0 16px;font-size:18px;background:var(--ink);color:#fff}
+#mic{background:var(--sun);color:var(--ink)}
+#mic.rec{background:#d64545;color:#fff}
+:focus-visible{outline:3px solid var(--sun);outline-offset:2px}
+header .row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+header .row h1{margin:0;flex:1}
+.tool{border:1.5px solid var(--ink);background:#fff;color:var(--ink);border-radius:10px;padding:6px 12px;font-size:14px}
+select{font-size:15px;padding:6px 8px;border-radius:10px;border:1.5px solid var(--ink);background:#fff;color:var(--ink)}
+#panel{position:fixed;inset:0;background:var(--bg);z-index:5;display:none;flex-direction:column;padding:calc(14px + env(safe-area-inset-top)) 16px 16px;overflow-y:auto}
+#panel.open{display:flex}
+#panel h2{margin:0 0 12px;font-size:19px}
+.item{display:flex;gap:8px;align-items:center;background:#fff;border:1px solid #dde5e8;border-radius:12px;padding:10px 12px;margin-bottom:8px}
+.item .t{flex:1}.item small{color:#5b6b78;display:block}
+.opt{display:block;width:100%;text-align:left;margin:6px 0;padding:12px;border:1.5px solid #cfd9de;border-radius:12px;background:#fff;font-size:16px;color:var(--ink)}
+.opt.ok{background:#d9f0e1;border-color:#2e9e5b}.opt.no{background:#f9dcdc;border-color:#d64545}
+.note{background:var(--foam);padding:10px 12px;border-radius:12px;margin:8px 0}
+</style>
+</head>
+<body>
+<header>
+  <div class="row"><h1>English Buddy</h1>
+    <select id="level" aria-label="Niveau"><option>A1</option><option selected>A2</option><option>B1</option><option>B2</option><option>C1</option><option>C2</option></select></div>
+  <div class="row"><button class="tool" id="hist">🕘 Historique</button><button class="tool" id="quizBtn">📝 Quiz</button><button class="tool" id="newBtn">＋ Nouveau</button></div>
+  <div id="topics"></div>
+</header>
+<div id="panel"></div>
+<main id="chat"><p class="hint">Choisis un thème, puis parle ou écris en anglais.</p></main>
+<footer>
+  <button id="mic" aria-label="Parler">🎤</button>
+  <input id="txt" placeholder="Write in English…" autocomplete="off">
+  <button id="send" aria-label="Envoyer">➤</button>
+</footer>
+<script>
+const API = "https://TON-SERVEUR.example.com"; // URL de ton backend Python
+const TOPICS = {"Transport":"public transport (bus, train, taxi)","Voyage":"travel and airports","Plage":"at the beach","Rue":"asking for directions in the street","Restaurant":"ordering at a restaurant","Hôtel":"checking in at a hotel","Cinéma":"going to the cinema","Tous les jours":"everyday small talk"};
+const $ = id => document.getElementById(id);
+const chat = $("chat"), txt = $("txt"), panel = $("panel"), levelSel = $("level");
+let topicName = "Tous les jours", conv = newConv();
+
+function newConv(){ return {id:Date.now(), topic:topicName, level:levelSel?levelSel.value:"A2", messages:[], date:new Date().toISOString()}; }
+function load(){ try{ return JSON.parse(localStorage.getItem("eb_hist")||"[]"); }catch(e){ return []; } }
+function persist(){
+  if(!conv.messages.length) return;
+  const all = load().filter(c=>c.id!==conv.id); all.unshift(conv);
+  try{ localStorage.setItem("eb_hist", JSON.stringify(all.slice(0,50))); }catch(e){}
+}
+try{ const l=localStorage.getItem("eb_level"); if(l) levelSel.value=l; }catch(e){}
+levelSel.onchange = () => { conv.level = levelSel.value; try{localStorage.setItem("eb_level", levelSel.value);}catch(e){} };
+
+const tb = $("topics");
+Object.keys(TOPICS).forEach(name => {
+  const b = document.createElement("button"); b.textContent = name;
+  if (name === topicName) b.className = "on";
+  b.onclick = () => { topicName = name; reset(); };
+  tb.appendChild(b);
+});
+function markTopic(){ [...tb.children].forEach(c => c.classList.toggle("on", c.textContent===topicName)); }
+function reset(){
+  conv = newConv(); markTopic();
+  chat.innerHTML = '<p class="hint">Thème : '+topicName+' · Niveau '+conv.level+'. Dis « Hello! » pour commencer.</p>';
+}
+$("newBtn").onclick = reset;
+
+function bubble(text, who) {
+  const h = chat.querySelector(".hint"); if (h) h.remove();
+  const d = document.createElement("div"); d.className = "b " + who; d.textContent = text;
+  chat.appendChild(d); chat.scrollTop = chat.scrollHeight;
+}
+function speak(t) {
+  if (!("speechSynthesis" in window)) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(t.replace(/Correction:.*\n?/i, "")); u.lang = "en-US";
+  u.rate = ({A1:.7,A2:.8,B1:.9}[conv.level]) || 1; speechSynthesis.speak(u);
+}
+async function post(path, body){
+  const r = await fetch(API+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(!r.ok) throw new Error(r.status); return r.json();
+}
+async function send(text) {
+  text = text.trim(); if (!text) return;
+  txt.value = ""; bubble(text, "me"); conv.messages.push({role:"user", content:text});
+  try {
+    const {reply} = await post("/chat",{topic:TOPICS[topicName], level:conv.level, messages:conv.messages});
+    conv.messages.push({role:"assistant", content:reply}); bubble(reply, "ai"); speak(reply); persist();
+  } catch (e) { conv.messages.pop(); bubble("Connexion impossible. Vérifie internet et l'adresse du serveur.", "ai"); }
+}
+$("send").onclick = () => send(txt.value);
+txt.onkeydown = e => { if (e.key === "Enter") send(txt.value); };
+
+// --- Historique ---
+function closePanel(){ panel.classList.remove("open"); panel.innerHTML=""; }
+function closeBtn(){ return '<button class="tool" onclick="closePanel()" style="align-self:flex-start;margin-bottom:10px">← Retour</button>'; }
+$("hist").onclick = () => {
+  const all = load();
+  panel.innerHTML = closeBtn()+"<h2>Historique</h2>";
+  if(!all.length) panel.innerHTML += '<p class="hint">Aucune conversation pour l\'instant.</p>';
+  all.forEach(c => {
+    const first = (c.messages[0]||{}).content||"";
+    const d = document.createElement("div"); d.className="item";
+    d.innerHTML = '<div class="t"><b></b><small></small></div><button class="tool">Ouvrir</button><button class="tool" aria-label="Supprimer">🗑</button>';
+    d.querySelector("b").textContent = c.topic+" · "+c.level;
+    d.querySelector("small").textContent = new Date(c.date).toLocaleDateString("fr-FR")+" — "+first.slice(0,40);
+    const [open,del] = d.querySelectorAll("button");
+    open.onclick = () => { conv=c; topicName=c.topic; levelSel.value=c.level; markTopic(); chat.innerHTML="";
+      c.messages.forEach(m=>bubble(m.content, m.role==="user"?"me":"ai")); closePanel(); };
+    del.onclick = () => { try{localStorage.setItem("eb_hist", JSON.stringify(load().filter(x=>x.id!==c.id)));}catch(e){} $("hist").onclick(); };
+    panel.appendChild(d);
+  });
+  panel.classList.add("open");
+};
+
+// --- Quiz de vocabulaire ---
+$("quizBtn").onclick = async () => {
+  panel.innerHTML = closeBtn()+'<h2>Quiz : '+topicName+' · '+conv.level+'</h2><p class="hint">Préparation du quiz…</p>';
+  panel.classList.add("open");
+  let qs;
+  try { qs = (await post("/quiz",{topic:TOPICS[topicName], level:conv.level, n:5})).questions; }
+  catch(e){ panel.querySelector(".hint").textContent="Impossible de créer le quiz. Vérifie la connexion."; return; }
+  let i=0, score=0;
+  const show = () => {
+    if(i>=qs.length){ panel.innerHTML = closeBtn()+'<h2>Résultat : '+score+' / '+qs.length+'</h2><button class="tool" id="again">Rejouer</button>';
+      $("again").onclick = $("quizBtn").onclick; return; }
+    const q = qs[i];
+    panel.innerHTML = closeBtn()+'<h2>Question '+(i+1)+' / '+qs.length+'</h2><p id="qq"></p><div id="opts"></div><div id="fb"></div>';
+    $("qq").innerHTML = String(q.q).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/\*\*(.+?)\*\*/g,"<b>$1</b>");
+    q.options.forEach((o,k)=>{
+      const b=document.createElement("button"); b.className="opt"; b.textContent=o;
+      b.onclick=()=>{
+        [...$("opts").children].forEach((x,j)=>{x.disabled=true; if(j===q.answer)x.classList.add("ok");});
+        if(k===q.answer) score++; else b.classList.add("no");
+        $("fb").innerHTML='<div class="note"></div><button class="tool" id="nx">Suivant</button>';
+        $("fb").firstChild.textContent=q.explain||""; $("nx").onclick=()=>{i++;show();};
+      };
+      $("opts").appendChild(b);
+    });
+  };
+  show();
+};
+
+// --- Micro ---
+const mic = $("mic");
+mic.onclick = async () => {
+  const SR = window.Capacitor?.Plugins?.SpeechRecognition;
+  if (SR) {
+    await SR.requestPermissions(); mic.classList.add("rec");
+    const {matches} = await SR.start({language:"en-US", maxResults:1, popup:false, partialResults:false});
+    mic.classList.remove("rec"); if (matches?.[0]) send(matches[0]);
+  } else if (window.webkitSpeechRecognition) {
+    const r = new webkitSpeechRecognition(); r.lang = "en-US";
+    r.onstart = () => mic.classList.add("rec"); r.onend = () => mic.classList.remove("rec");
+    r.onresult = e => send(e.results[0][0].transcript); r.start();
+  } else bubble("Micro non disponible ici. Écris ta phrase.", "ai");
+};
+</script>
+</body>
+</html>
